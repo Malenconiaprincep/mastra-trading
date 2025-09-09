@@ -10,7 +10,7 @@ import { z, ZodFirstPartyTypeKind, ZodObject } from 'zod';
 import { openai as openai$2 } from '@ai-sdk/openai';
 import { Agent, MessageList } from '@mastra/core/agent';
 import { Memory as Memory$1 } from '@mastra/memory';
-import { weatherTool } from './tools/618ad44b-9d2b-49b6-a972-9a2f16a5f0d1.mjs';
+import { createTool, isVercelTool, Tool } from '@mastra/core/tools';
 import crypto$1, { randomUUID } from 'crypto';
 import { readdir, readFile, mkdtemp, rm, writeFile, mkdir, copyFile, stat } from 'fs/promises';
 import { join as join$1 } from 'path/posix';
@@ -21,7 +21,6 @@ import { existsSync, readFileSync, createReadStream, lstatSync } from 'fs';
 import { join, resolve as resolve$3, dirname, extname, basename, isAbsolute, relative } from 'path';
 import { RuntimeContext } from '@mastra/core/runtime-context';
 import { Telemetry } from '@mastra/core/telemetry';
-import { createTool, isVercelTool, Tool } from '@mastra/core/tools';
 import util, { promisify } from 'util';
 import { Buffer as Buffer$1 } from 'buffer';
 import { zodToJsonSchema as zodToJsonSchema$2 } from '@mastra/core/utils/zod-to-json';
@@ -37,193 +36,1324 @@ import { createRequire } from 'module';
 import { tmpdir } from 'os';
 import { tools } from './tools.mjs';
 
-const forecastSchema = z.object({
-  date: z.string(),
-  maxTemp: z.number(),
-  minTemp: z.number(),
-  precipitationChance: z.number(),
-  condition: z.string(),
-  location: z.string()
+const stockAnalysisInputSchema = z.object({
+  stockCode: z.string().describe("\u80A1\u7968\u4EE3\u7801\uFF0C\u5982000001.SZ\uFF08\u5E73\u5B89\u94F6\u884C\uFF09\u6216510300.SH\uFF08\u6CAA\u6DF1300ETF\uFF09"),
+  analysisType: z.enum(["comprehensive", "quick", "risk-focused"]).default("comprehensive").describe("\u5206\u6790\u7C7B\u578B\uFF1Acomprehensive(\u5168\u9762\u5206\u6790)\u3001quick(\u5FEB\u901F\u5206\u6790)\u3001risk-focused(\u98CE\u9669\u5BFC\u5411\u5206\u6790)")
 });
-function getWeatherCondition(code) {
-  const conditions = {
-    0: "Clear sky",
-    1: "Mainly clear",
-    2: "Partly cloudy",
-    3: "Overcast",
-    45: "Foggy",
-    48: "Depositing rime fog",
-    51: "Light drizzle",
-    53: "Moderate drizzle",
-    55: "Dense drizzle",
-    61: "Slight rain",
-    63: "Moderate rain",
-    65: "Heavy rain",
-    71: "Slight snow fall",
-    73: "Moderate snow fall",
-    75: "Heavy snow fall",
-    95: "Thunderstorm"
-  };
-  return conditions[code] || "Unknown";
-}
-const fetchWeather = createStep({
-  id: "fetch-weather",
-  description: "Fetches weather forecast for a given city",
-  inputSchema: z.object({
-    city: z.string().describe("The city to get the weather for")
+const stockAnalysisOutputSchema = z.object({
+  stockCode: z.string(),
+  analysisType: z.string(),
+  timestamp: z.string(),
+  summary: z.object({
+    title: z.string(),
+    analysisType: z.string()
   }),
-  outputSchema: forecastSchema,
+  analystTeam: z.object({
+    companyOverview: z.string().optional(),
+    marketAnalysis: z.string().optional(),
+    sentimentAnalysis: z.string().optional(),
+    newsAnalysis: z.string().optional(),
+    fundamentalsAnalysis: z.string().optional(),
+    shareholderAnalysis: z.string().optional(),
+    productAnalysis: z.string().optional()
+  }),
+  researcherTeam: z.object({
+    bullResearch: z.string().optional(),
+    bearResearch: z.string().optional()
+  }),
+  riskTeam: z.object({
+    aggressiveRisk: z.string().optional(),
+    safeRisk: z.string().optional(),
+    neutralRisk: z.string().optional(),
+    riskManagement: z.string().optional()
+  }),
+  managementTeam: z.object({
+    researchManagement: z.string().optional(),
+    tradingStrategy: z.string().optional()
+  }),
+  conclusion: z.object({
+    recommendation: z.string(),
+    riskLevel: z.string(),
+    targetPrice: z.string(),
+    timeHorizon: z.string()
+  })
+});
+createStep({
+  id: "analyst-team",
+  description: "\u5206\u6790\u5E08\u56E2\u961F\u5E76\u884C\u5206\u6790",
+  inputSchema: stockAnalysisInputSchema,
+  outputSchema: z.object({
+    companyOverview: z.string(),
+    marketAnalysis: z.string(),
+    sentimentAnalysis: z.string(),
+    newsAnalysis: z.string(),
+    fundamentalsAnalysis: z.string(),
+    shareholderAnalysis: z.string(),
+    productAnalysis: z.string()
+  }),
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+    const stockCode = inputData.stockCode;
+    const companyAnalyst = mastra?.getAgent("companyOverviewAnalyst");
+    const marketAnalyst = mastra?.getAgent("marketAnalyst");
+    const sentimentAnalyst = mastra?.getAgent("sentimentAnalyst");
+    const newsAnalyst = mastra?.getAgent("newsAnalyst");
+    const fundamentalsAnalyst = mastra?.getAgent("fundamentalsAnalyst");
+    const shareholderAnalyst = mastra?.getAgent("shareholderAnalyst");
+    const productAnalyst = mastra?.getAgent("productAnalyst");
+    if (!companyAnalyst || !marketAnalyst || !sentimentAnalyst || !newsAnalyst || !fundamentalsAnalyst || !shareholderAnalyst || !productAnalyst) {
+      throw new Error("Required analysts not found");
+    }
+    const [
+      companyResult,
+      marketResult,
+      sentimentResult,
+      newsResult,
+      fundamentalsResult,
+      shareholderResult,
+      productResult
+    ] = await Promise.all([
+      companyAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u516C\u53F8\u6982\u8FF0\u60C5\u51B5` }]),
+      marketAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u5E02\u573A\u8868\u73B0\u548C\u8D8B\u52BF` }]),
+      sentimentAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u5E02\u573A\u60C5\u7EEA` }]),
+      newsAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u76F8\u5173\u65B0\u95FB` }]),
+      fundamentalsAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u57FA\u672C\u9762\u60C5\u51B5` }]),
+      shareholderAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u80A1\u4E1C\u7ED3\u6784` }]),
+      productAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u4EA7\u54C1\u7ADE\u4E89\u529B` }])
+    ]);
+    let companyText = "";
+    let marketText = "";
+    let sentimentText = "";
+    let newsText = "";
+    let fundamentalsText = "";
+    let shareholderText = "";
+    let productText = "";
+    for await (const chunk of companyResult.textStream) {
+      companyText += chunk;
+    }
+    for await (const chunk of marketResult.textStream) {
+      marketText += chunk;
+    }
+    for await (const chunk of sentimentResult.textStream) {
+      sentimentText += chunk;
+    }
+    for await (const chunk of newsResult.textStream) {
+      newsText += chunk;
+    }
+    for await (const chunk of fundamentalsResult.textStream) {
+      fundamentalsText += chunk;
+    }
+    for await (const chunk of shareholderResult.textStream) {
+      shareholderText += chunk;
+    }
+    for await (const chunk of productResult.textStream) {
+      productText += chunk;
+    }
+    return {
+      companyOverview: companyText,
+      marketAnalysis: marketText,
+      sentimentAnalysis: sentimentText,
+      newsAnalysis: newsText,
+      fundamentalsAnalysis: fundamentalsText,
+      shareholderAnalysis: shareholderText,
+      productAnalysis: productText
+    };
+  }
+});
+createStep({
+  id: "researcher-team",
+  description: "\u7814\u7A76\u5458\u56E2\u961F\u5E76\u884C\u5206\u6790",
+  inputSchema: z.object({
+    stockCode: z.string(),
+    analysisType: z.string(),
+    analystResults: z.object({
+      companyOverview: z.string(),
+      marketAnalysis: z.string(),
+      sentimentAnalysis: z.string(),
+      newsAnalysis: z.string(),
+      fundamentalsAnalysis: z.string(),
+      shareholderAnalysis: z.string(),
+      productAnalysis: z.string()
+    })
+  }),
+  outputSchema: z.object({
+    bullResearch: z.string(),
+    bearResearch: z.string()
+  }),
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+    const stockCode = inputData.stockCode;
+    const analystResults = inputData.analystResults;
+    const bullResearcher = mastra?.getAgent("bullResearcher");
+    const bearResearcher = mastra?.getAgent("bearResearcher");
+    if (!bullResearcher || !bearResearcher) {
+      throw new Error("Required researchers not found");
+    }
+    const [bullResult, bearResult] = await Promise.all([
+      bullResearcher.stream([{ role: "user", content: `\u57FA\u4E8E\u4EE5\u4E0B\u5206\u6790\u5E08\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u770B\u6DA8\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u6295\u8D44\u673A\u4F1A\uFF1A
+${JSON.stringify(analystResults, null, 2)}` }]),
+      bearResearcher.stream([{ role: "user", content: `\u57FA\u4E8E\u4EE5\u4E0B\u5206\u6790\u5E08\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u770B\u8DCC\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u6295\u8D44\u98CE\u9669\uFF1A
+${JSON.stringify(analystResults, null, 2)}` }])
+    ]);
+    let bullText = "";
+    let bearText = "";
+    for await (const chunk of bullResult.textStream) {
+      bullText += chunk;
+    }
+    for await (const chunk of bearResult.textStream) {
+      bearText += chunk;
+    }
+    return {
+      bullResearch: bullText,
+      bearResearch: bearText
+    };
+  }
+});
+createStep({
+  id: "risk-team",
+  description: "\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u5E76\u884C\u5206\u6790",
+  inputSchema: z.object({
+    stockCode: z.string(),
+    analysisType: z.string(),
+    analystResults: z.object({
+      companyOverview: z.string(),
+      marketAnalysis: z.string(),
+      sentimentAnalysis: z.string(),
+      newsAnalysis: z.string(),
+      fundamentalsAnalysis: z.string(),
+      shareholderAnalysis: z.string(),
+      productAnalysis: z.string()
+    }),
+    researcherResults: z.object({
+      bullResearch: z.string(),
+      bearResearch: z.string()
+    })
+  }),
+  outputSchema: z.object({
+    aggressiveRisk: z.string(),
+    safeRisk: z.string(),
+    neutralRisk: z.string(),
+    riskManagement: z.string()
+  }),
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+    const stockCode = inputData.stockCode;
+    const aggressiveRiskAnalyst = mastra?.getAgent("aggressiveRiskAnalyst");
+    const safeRiskAnalyst = mastra?.getAgent("safeRiskAnalyst");
+    const neutralRiskAnalyst = mastra?.getAgent("neutralRiskAnalyst");
+    const riskManager = mastra?.getAgent("riskManager");
+    if (!aggressiveRiskAnalyst || !safeRiskAnalyst || !neutralRiskAnalyst || !riskManager) {
+      throw new Error("Required risk analysts not found");
+    }
+    const [aggressiveResult, safeResult, neutralResult] = await Promise.all([
+      aggressiveRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u6FC0\u8FDB\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }]),
+      safeRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u4FDD\u5B88\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }]),
+      neutralRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u4E2D\u6027\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }])
+    ]);
+    const riskManagementResult = await riskManager.stream([{ role: "user", content: `\u8BF7\u7EDF\u7B79\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u4E3A\u80A1\u7968 ${stockCode} \u5236\u5B9A\u7EFC\u5408\u98CE\u9669\u7BA1\u7406\u7B56\u7565` }]);
+    let aggressiveText = "";
+    let safeText = "";
+    let neutralText = "";
+    let riskManagementText = "";
+    for await (const chunk of aggressiveResult.textStream) {
+      aggressiveText += chunk;
+    }
+    for await (const chunk of safeResult.textStream) {
+      safeText += chunk;
+    }
+    for await (const chunk of neutralResult.textStream) {
+      neutralText += chunk;
+    }
+    for await (const chunk of riskManagementResult.textStream) {
+      riskManagementText += chunk;
+    }
+    return {
+      aggressiveRisk: aggressiveText,
+      safeRisk: safeText,
+      neutralRisk: neutralText,
+      riskManagement: riskManagementText
+    };
+  }
+});
+createStep({
+  id: "research-management",
+  description: "\u7814\u7A76\u7ECF\u7406\u7EFC\u5408\u7814\u7A76",
+  inputSchema: z.object({
+    stockCode: z.string(),
+    analysisType: z.string(),
+    analystResults: z.object({
+      companyOverview: z.string(),
+      marketAnalysis: z.string(),
+      sentimentAnalysis: z.string(),
+      newsAnalysis: z.string(),
+      fundamentalsAnalysis: z.string(),
+      shareholderAnalysis: z.string(),
+      productAnalysis: z.string()
+    }),
+    researcherResults: z.object({
+      bullResearch: z.string(),
+      bearResearch: z.string()
+    }),
+    riskResults: z.object({
+      aggressiveRisk: z.string(),
+      safeRisk: z.string(),
+      neutralRisk: z.string(),
+      riskManagement: z.string()
+    })
+  }),
+  outputSchema: z.object({
+    researchManagement: z.string(),
+    tradingStrategy: z.string()
+  }),
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+    const stockCode = inputData.stockCode;
+    const allResults = {
+      analystResults: inputData.analystResults,
+      researcherResults: inputData.researcherResults,
+      riskResults: inputData.riskResults
+    };
+    const researchManager = mastra?.getAgent("researchManager");
+    const trader = mastra?.getAgent("trader");
+    if (!researchManager || !trader) {
+      throw new Error("Required managers not found");
+    }
+    const researchResult = await researchManager.stream([{ role: "user", content: `\u8BF7\u6574\u5408\u6240\u6709\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u4E3A\u80A1\u7968 ${stockCode} \u63D0\u4F9B\u7EFC\u5408\u6295\u8D44\u5EFA\u8BAE\uFF1A
+${JSON.stringify(allResults, null, 2)}` }]);
+    const tradingResult = await trader.stream([{ role: "user", content: `\u57FA\u4E8E\u7EFC\u5408\u7814\u7A76\u7ED3\u679C\uFF0C\u8BF7\u4E3A\u80A1\u7968 ${stockCode} \u5236\u5B9A\u5177\u4F53\u7684\u4EA4\u6613\u7B56\u7565` }]);
+    let researchText = "";
+    let tradingText = "";
+    for await (const chunk of researchResult.textStream) {
+      researchText += chunk;
+    }
+    for await (const chunk of tradingResult.textStream) {
+      tradingText += chunk;
+    }
+    return {
+      researchManagement: researchText,
+      tradingStrategy: tradingText
+    };
+  }
+});
+createStep({
+  id: "final-report",
+  description: "\u751F\u6210\u6700\u7EC8\u7EFC\u5408\u62A5\u544A",
+  inputSchema: z.object({
+    stockCode: z.string(),
+    analysisType: z.string(),
+    analystResults: z.object({
+      companyOverview: z.string(),
+      marketAnalysis: z.string(),
+      sentimentAnalysis: z.string(),
+      newsAnalysis: z.string(),
+      fundamentalsAnalysis: z.string(),
+      shareholderAnalysis: z.string(),
+      productAnalysis: z.string()
+    }),
+    researcherResults: z.object({
+      bullResearch: z.string(),
+      bearResearch: z.string()
+    }),
+    riskResults: z.object({
+      aggressiveRisk: z.string(),
+      safeRisk: z.string(),
+      neutralRisk: z.string(),
+      riskManagement: z.string()
+    }),
+    managementResults: z.object({
+      researchManagement: z.string(),
+      tradingStrategy: z.string()
+    })
+  }),
+  outputSchema: stockAnalysisOutputSchema,
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error("Input data not found");
     }
-    const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(inputData.city)}&count=1`;
-    const geocodingResponse = await fetch(geocodingUrl);
-    const geocodingData = await geocodingResponse.json();
-    if (!geocodingData.results?.[0]) {
-      throw new Error(`Location '${inputData.city}' not found`);
-    }
-    const { latitude, longitude, name } = geocodingData.results[0];
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=precipitation,weathercode&timezone=auto,&hourly=precipitation_probability,temperature_2m`;
-    const response = await fetch(weatherUrl);
-    const data = await response.json();
-    const forecast = {
-      date: (/* @__PURE__ */ new Date()).toISOString(),
-      maxTemp: Math.max(...data.hourly.temperature_2m),
-      minTemp: Math.min(...data.hourly.temperature_2m),
-      condition: getWeatherCondition(data.current.weathercode),
-      precipitationChance: data.hourly.precipitation_probability.reduce(
-        (acc, curr) => Math.max(acc, curr),
-        0
-      ),
-      location: name
-    };
-    return forecast;
-  }
-});
-const planActivities = createStep({
-  id: "plan-activities",
-  description: "Suggests activities based on weather conditions",
-  inputSchema: forecastSchema,
-  outputSchema: z.object({
-    activities: z.string()
-  }),
-  execute: async ({ inputData, mastra }) => {
-    const forecast = inputData;
-    if (!forecast) {
-      throw new Error("Forecast data not found");
-    }
-    const agent = mastra?.getAgent("weatherAgent");
-    if (!agent) {
-      throw new Error("Weather agent not found");
-    }
-    const prompt = `Based on the following weather forecast for ${forecast.location}, suggest appropriate activities:
-      ${JSON.stringify(forecast, null, 2)}
-      For each day in the forecast, structure your response exactly as follows:
-
-      \u{1F4C5} [Day, Month Date, Year]
-      \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-      \u{1F321}\uFE0F WEATHER SUMMARY
-      \u2022 Conditions: [brief description]
-      \u2022 Temperature: [X\xB0C/Y\xB0F to A\xB0C/B\xB0F]
-      \u2022 Precipitation: [X% chance]
-
-      \u{1F305} MORNING ACTIVITIES
-      Outdoor:
-      \u2022 [Activity Name] - [Brief description including specific location/route]
-        Best timing: [specific time range]
-        Note: [relevant weather consideration]
-
-      \u{1F31E} AFTERNOON ACTIVITIES
-      Outdoor:
-      \u2022 [Activity Name] - [Brief description including specific location/route]
-        Best timing: [specific time range]
-        Note: [relevant weather consideration]
-
-      \u{1F3E0} INDOOR ALTERNATIVES
-      \u2022 [Activity Name] - [Brief description including specific venue]
-        Ideal for: [weather condition that would trigger this alternative]
-
-      \u26A0\uFE0F SPECIAL CONSIDERATIONS
-      \u2022 [Any relevant weather warnings, UV index, wind conditions, etc.]
-
-      Guidelines:
-      - Suggest 2-3 time-specific outdoor activities per day
-      - Include 1-2 indoor backup options
-      - For precipitation >50%, lead with indoor activities
-      - All activities must be specific to the location
-      - Include specific venues, trails, or locations
-      - Consider activity intensity based on temperature
-      - Keep descriptions concise but informative
-
-      Maintain this exact formatting for consistency, using the emoji and section headers as shown.`;
-    const response = await agent.stream([
-      {
-        role: "user",
-        content: prompt
-      }
-    ]);
-    let activitiesText = "";
-    for await (const chunk of response.textStream) {
-      process.stdout.write(chunk);
-      activitiesText += chunk;
-    }
+    const stockCode = inputData.stockCode;
+    const analysisType = inputData.analysisType;
     return {
-      activities: activitiesText
+      stockCode,
+      analysisType,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      summary: {
+        title: `\u80A1\u7968 ${stockCode} \u7EFC\u5408\u5206\u6790\u62A5\u544A`,
+        analysisType: analysisType === "comprehensive" ? "\u5168\u9762\u5206\u6790" : analysisType === "quick" ? "\u5FEB\u901F\u5206\u6790" : "\u98CE\u9669\u5BFC\u5411\u5206\u6790"
+      },
+      analystTeam: inputData.analystResults,
+      researcherTeam: inputData.researcherResults,
+      riskTeam: inputData.riskResults,
+      managementTeam: inputData.managementResults,
+      conclusion: {
+        recommendation: "\u57FA\u4E8E\u591A\u7EF4\u5EA6\u5206\u6790\u7684\u7EFC\u5408\u6295\u8D44\u5EFA\u8BAE",
+        riskLevel: "\u7EFC\u5408\u98CE\u9669\u8BC4\u4F30",
+        targetPrice: "\u76EE\u6807\u4EF7\u4F4D\u5EFA\u8BAE",
+        timeHorizon: "\u6295\u8D44\u65F6\u95F4\u7A97\u53E3"
+      }
     };
   }
 });
-const weatherWorkflow = createWorkflow({
-  id: "weather-workflow",
+const comprehensiveAnalysisStep = createStep({
+  id: "comprehensive-analysis",
+  description: "\u6267\u884C\u5B8C\u6574\u7684\u80A1\u7968\u5206\u6790\u6D41\u7A0B",
+  inputSchema: stockAnalysisInputSchema,
+  outputSchema: stockAnalysisOutputSchema,
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+    const stockCode = inputData.stockCode;
+    const analysisType = inputData.analysisType;
+    const companyAnalyst = mastra?.getAgent("companyOverviewAnalyst");
+    const marketAnalyst = mastra?.getAgent("marketAnalyst");
+    const sentimentAnalyst = mastra?.getAgent("sentimentAnalyst");
+    const newsAnalyst = mastra?.getAgent("newsAnalyst");
+    const fundamentalsAnalyst = mastra?.getAgent("fundamentalsAnalyst");
+    const shareholderAnalyst = mastra?.getAgent("shareholderAnalyst");
+    const productAnalyst = mastra?.getAgent("productAnalyst");
+    const bullResearcher = mastra?.getAgent("bullResearcher");
+    const bearResearcher = mastra?.getAgent("bearResearcher");
+    const researchManager = mastra?.getAgent("researchManager");
+    const trader = mastra?.getAgent("trader");
+    const aggressiveRiskAnalyst = mastra?.getAgent("aggressiveRiskAnalyst");
+    const safeRiskAnalyst = mastra?.getAgent("safeRiskAnalyst");
+    const neutralRiskAnalyst = mastra?.getAgent("neutralRiskAnalyst");
+    const riskManager = mastra?.getAgent("riskManager");
+    if (!companyAnalyst || !marketAnalyst || !sentimentAnalyst || !newsAnalyst || !fundamentalsAnalyst || !shareholderAnalyst || !productAnalyst || !bullResearcher || !bearResearcher || !researchManager || !trader || !aggressiveRiskAnalyst || !safeRiskAnalyst || !neutralRiskAnalyst || !riskManager) {
+      throw new Error("Required agents not found");
+    }
+    console.log("\u{1F4CA} \u5F00\u59CB\u5206\u6790\u5E08\u56E2\u961F\u5206\u6790...");
+    const [
+      companyResult,
+      marketResult,
+      sentimentResult,
+      newsResult,
+      fundamentalsResult,
+      shareholderResult,
+      productResult
+    ] = await Promise.all([
+      companyAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u516C\u53F8\u6982\u8FF0\u60C5\u51B5` }]),
+      marketAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u5E02\u573A\u8868\u73B0\u548C\u8D8B\u52BF` }]),
+      sentimentAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u5E02\u573A\u60C5\u7EEA` }]),
+      newsAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u76F8\u5173\u65B0\u95FB` }]),
+      fundamentalsAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u57FA\u672C\u9762\u60C5\u51B5` }]),
+      shareholderAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u80A1\u4E1C\u7ED3\u6784` }]),
+      productAnalyst.stream([{ role: "user", content: `\u8BF7\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u4EA7\u54C1\u7ADE\u4E89\u529B` }])
+    ]);
+    let companyText = "";
+    let marketText = "";
+    let sentimentText = "";
+    let newsText = "";
+    let fundamentalsText = "";
+    let shareholderText = "";
+    let productText = "";
+    for await (const chunk of companyResult.textStream) {
+      companyText += chunk;
+    }
+    for await (const chunk of marketResult.textStream) {
+      marketText += chunk;
+    }
+    for await (const chunk of sentimentResult.textStream) {
+      sentimentText += chunk;
+    }
+    for await (const chunk of newsResult.textStream) {
+      newsText += chunk;
+    }
+    for await (const chunk of fundamentalsResult.textStream) {
+      fundamentalsText += chunk;
+    }
+    for await (const chunk of shareholderResult.textStream) {
+      shareholderText += chunk;
+    }
+    for await (const chunk of productResult.textStream) {
+      productText += chunk;
+    }
+    const analystResults = {
+      companyOverview: companyText,
+      marketAnalysis: marketText,
+      sentimentAnalysis: sentimentText,
+      newsAnalysis: newsText,
+      fundamentalsAnalysis: fundamentalsText,
+      shareholderAnalysis: shareholderText,
+      productAnalysis: productText
+    };
+    console.log("\u{1F52C} \u5F00\u59CB\u7814\u7A76\u5458\u56E2\u961F\u5206\u6790...");
+    const [bullResult, bearResult] = await Promise.all([
+      bullResearcher.stream([{ role: "user", content: `\u57FA\u4E8E\u5206\u6790\u5E08\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u770B\u6DA8\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u6295\u8D44\u673A\u4F1A` }]),
+      bearResearcher.stream([{ role: "user", content: `\u57FA\u4E8E\u5206\u6790\u5E08\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u770B\u8DCC\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u6295\u8D44\u98CE\u9669` }])
+    ]);
+    let bullText = "";
+    let bearText = "";
+    for await (const chunk of bullResult.textStream) {
+      bullText += chunk;
+    }
+    for await (const chunk of bearResult.textStream) {
+      bearText += chunk;
+    }
+    const researcherResults = {
+      bullResearch: bullText,
+      bearResearch: bearText
+    };
+    console.log("\u26A0\uFE0F \u5F00\u59CB\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u5206\u6790...");
+    const [aggressiveResult, safeResult, neutralResult] = await Promise.all([
+      aggressiveRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u6FC0\u8FDB\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }]),
+      safeRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u4FDD\u5B88\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }]),
+      neutralRiskAnalyst.stream([{ role: "user", content: `\u57FA\u4E8E\u524D\u671F\u5206\u6790\u7ED3\u679C\uFF0C\u8BF7\u4ECE\u4E2D\u6027\u6295\u8D44\u89D2\u5EA6\u5206\u6790\u80A1\u7968 ${stockCode} \u7684\u98CE\u9669` }])
+    ]);
+    let aggressiveText = "";
+    let safeText = "";
+    let neutralText = "";
+    for await (const chunk of aggressiveResult.textStream) {
+      aggressiveText += chunk;
+    }
+    for await (const chunk of safeResult.textStream) {
+      safeText += chunk;
+    }
+    for await (const chunk of neutralResult.textStream) {
+      neutralText += chunk;
+    }
+    const riskManagementResult = await riskManager.stream([{ role: "user", content: `\u8BF7\u7EDF\u7B79\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u4E3A\u80A1\u7968 ${stockCode} \u5236\u5B9A\u7EFC\u5408\u98CE\u9669\u7BA1\u7406\u7B56\u7565` }]);
+    let riskManagementText = "";
+    for await (const chunk of riskManagementResult.textStream) {
+      riskManagementText += chunk;
+    }
+    const riskResults = {
+      aggressiveRisk: aggressiveText,
+      safeRisk: safeText,
+      neutralRisk: neutralText,
+      riskManagement: riskManagementText
+    };
+    console.log("\u{1F454} \u5F00\u59CB\u7BA1\u7406\u5C42\u5206\u6790...");
+    const researchResult = await researchManager.stream([{ role: "user", content: `\u8BF7\u6574\u5408\u6240\u6709\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\uFF0C\u4E3A\u80A1\u7968 ${stockCode} \u63D0\u4F9B\u7EFC\u5408\u6295\u8D44\u5EFA\u8BAE` }]);
+    let researchText = "";
+    for await (const chunk of researchResult.textStream) {
+      researchText += chunk;
+    }
+    const tradingResult = await trader.stream([{ role: "user", content: `\u57FA\u4E8E\u7EFC\u5408\u7814\u7A76\u7ED3\u679C\uFF0C\u8BF7\u4E3A\u80A1\u7968 ${stockCode} \u5236\u5B9A\u5177\u4F53\u7684\u4EA4\u6613\u7B56\u7565` }]);
+    let tradingText = "";
+    for await (const chunk of tradingResult.textStream) {
+      tradingText += chunk;
+    }
+    const managementResults = {
+      researchManagement: researchText,
+      tradingStrategy: tradingText
+    };
+    console.log("\u{1F4CB} \u751F\u6210\u6700\u7EC8\u5206\u6790\u62A5\u544A...");
+    return {
+      stockCode,
+      analysisType,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      summary: {
+        title: `\u80A1\u7968 ${stockCode} \u7EFC\u5408\u5206\u6790\u62A5\u544A`,
+        analysisType: analysisType === "comprehensive" ? "\u5168\u9762\u5206\u6790" : analysisType === "quick" ? "\u5FEB\u901F\u5206\u6790" : "\u98CE\u9669\u5BFC\u5411\u5206\u6790"
+      },
+      analystTeam: analystResults,
+      researcherTeam: researcherResults,
+      riskTeam: riskResults,
+      managementTeam: managementResults,
+      conclusion: {
+        recommendation: "\u57FA\u4E8E\u591A\u7EF4\u5EA6\u5206\u6790\u7684\u7EFC\u5408\u6295\u8D44\u5EFA\u8BAE",
+        riskLevel: "\u7EFC\u5408\u98CE\u9669\u8BC4\u4F30",
+        targetPrice: "\u76EE\u6807\u4EF7\u4F4D\u5EFA\u8BAE",
+        timeHorizon: "\u6295\u8D44\u65F6\u95F4\u7A97\u53E3"
+      }
+    };
+  }
+});
+const stockAnalysisWorkflow = createWorkflow({
+  id: "stock-analysis-workflow",
+  inputSchema: stockAnalysisInputSchema,
+  outputSchema: stockAnalysisOutputSchema
+}).then(comprehensiveAnalysisStep);
+stockAnalysisWorkflow.commit();
+
+const stockDataTool = createTool({
+  id: "get-stock-data",
+  description: "\u83B7\u53D6A\u80A1\u548CETF\u7684\u80A1\u7968\u6570\u636E\uFF0C\u5305\u62EC\u57FA\u7840\u4FE1\u606F\u3001\u8D22\u52A1\u6570\u636E\u3001\u65B0\u95FB\u3001\u80A1\u4E1C\u4FE1\u606F\u7B49",
   inputSchema: z.object({
-    city: z.string().describe("The city to get the weather for")
+    stockCode: z.string().describe("\u80A1\u7968\u4EE3\u7801\uFF0C\u5982000001.SZ\uFF08\u5E73\u5B89\u94F6\u884C\uFF09\u6216510300.SH\uFF08\u6CAA\u6DF1300ETF\uFF09"),
+    dataType: z.enum(["basic", "financial", "news", "shareholder", "all"]).describe("\u9700\u8981\u83B7\u53D6\u7684\u6570\u636E\u7C7B\u578B")
   }),
   outputSchema: z.object({
-    activities: z.string()
-  })
-}).then(fetchWeather).then(planActivities);
-weatherWorkflow.commit();
+    stockInfo: z.object({
+      code: z.string(),
+      name: z.string(),
+      currentPrice: z.number(),
+      changePercent: z.number(),
+      volume: z.number(),
+      marketCap: z.number(),
+      pe: z.number(),
+      pb: z.number(),
+      industry: z.string()
+    }).optional(),
+    financialData: z.object({
+      revenue: z.number(),
+      netProfit: z.number(),
+      totalAssets: z.number(),
+      totalLiabilities: z.number(),
+      roe: z.number(),
+      roa: z.number(),
+      debtRatio: z.number()
+    }).optional(),
+    news: z.array(z.object({
+      title: z.string(),
+      content: z.string(),
+      publishTime: z.string(),
+      source: z.string(),
+      sentiment: z.enum(["positive", "negative", "neutral"])
+    })).optional(),
+    shareholderInfo: z.object({
+      topHolders: z.array(z.object({
+        name: z.string(),
+        shares: z.number(),
+        percentage: z.number()
+      })),
+      institutionalHolders: z.number(),
+      retailHolders: z.number()
+    }).optional()
+  }),
+  execute: async ({ context }) => {
+    return await getStockData(context.stockCode, context.dataType);
+  }
+});
+const getStockData = async (stockCode, dataType) => {
+  const result = {};
+  if (dataType === "basic" || dataType === "all") {
+    result.stockInfo = await getBasicStockInfo(stockCode);
+  }
+  if (dataType === "financial" || dataType === "all") {
+    result.financialData = await getFinancialData();
+  }
+  if (dataType === "news" || dataType === "all") {
+    result.news = await getNewsData(stockCode);
+  }
+  if (dataType === "shareholder" || dataType === "all") {
+    result.shareholderInfo = await getShareholderInfo();
+  }
+  return result;
+};
+const getBasicStockInfo = async (stockCode) => {
+  const mockData = {
+    "000001.SZ": {
+      code: "000001.SZ",
+      name: "\u5E73\u5B89\u94F6\u884C",
+      currentPrice: 12.45,
+      changePercent: 2.1,
+      volume: 125e6,
+      marketCap: 241e9,
+      pe: 4.2,
+      pb: 0.6,
+      industry: "\u94F6\u884C"
+    },
+    "510300.SH": {
+      code: "510300.SH",
+      name: "\u6CAA\u6DF1300ETF",
+      currentPrice: 3.89,
+      changePercent: -0.8,
+      volume: 89e6,
+      marketCap: 156e9,
+      pe: 12.5,
+      pb: 1.2,
+      industry: "ETF"
+    },
+    "000002.SZ": {
+      code: "000002.SZ",
+      name: "\u4E07\u79D1A",
+      currentPrice: 8.76,
+      changePercent: 1.5,
+      volume: 67e6,
+      marketCap: 98e9,
+      pe: 6.8,
+      pb: 0.8,
+      industry: "\u623F\u5730\u4EA7"
+    }
+  };
+  return mockData[stockCode] || {
+    code: stockCode,
+    name: "\u672A\u77E5\u80A1\u7968",
+    currentPrice: 0,
+    changePercent: 0,
+    volume: 0,
+    marketCap: 0,
+    pe: 0,
+    pb: 0,
+    industry: "\u672A\u77E5"
+  };
+};
+const getFinancialData = async (stockCode) => {
+  return {
+    revenue: 15e10,
+    netProfit: 25e9,
+    totalAssets: 45e11,
+    totalLiabilities: 42e11,
+    roe: 8.5,
+    roa: 0.6,
+    debtRatio: 0.93
+  };
+};
+const getNewsData = async (stockCode) => {
+  return [
+    {
+      title: `${stockCode}\u53D1\u5E032024\u5E74\u7B2C\u4E09\u5B63\u5EA6\u8D22\u62A5\uFF0C\u51C0\u5229\u6DA6\u540C\u6BD4\u589E\u957F15%`,
+      content: "\u516C\u53F8\u7B2C\u4E09\u5B63\u5EA6\u5B9E\u73B0\u8425\u4E1A\u6536\u5165...",
+      publishTime: "2024-10-15 09:30:00",
+      source: "\u8BC1\u5238\u65F6\u62A5",
+      sentiment: "positive"
+    },
+    {
+      title: `\u5E02\u573A\u5206\u6790\u5E08\u770B\u597D${stockCode}\u672A\u6765\u53D1\u5C55\u524D\u666F`,
+      content: "\u591A\u4F4D\u5206\u6790\u5E08\u8BA4\u4E3A\u8BE5\u516C\u53F8...",
+      publishTime: "2024-10-14 14:20:00",
+      source: "\u4E2D\u56FD\u8BC1\u5238\u62A5",
+      sentiment: "positive"
+    },
+    {
+      title: `${stockCode}\u9762\u4E34\u884C\u4E1A\u7ADE\u4E89\u52A0\u5267\u6311\u6218`,
+      content: "\u968F\u7740\u884C\u4E1A\u7ADE\u4E89\u65E5\u8D8B\u6FC0\u70C8...",
+      publishTime: "2024-10-13 16:45:00",
+      source: "\u8D22\u7ECF\u7F51",
+      sentiment: "negative"
+    }
+  ];
+};
+const getShareholderInfo = async (stockCode) => {
+  return {
+    topHolders: [
+      { name: "\u4E2D\u56FD\u5E73\u5B89\u4FDD\u9669\u96C6\u56E2", shares: 5e9, percentage: 25.6 },
+      { name: "\u9999\u6E2F\u4E2D\u592E\u7ED3\u7B97\u6709\u9650\u516C\u53F8", shares: 32e8, percentage: 16.4 },
+      { name: "\u5168\u56FD\u793E\u4FDD\u57FA\u91D1", shares: 18e8, percentage: 9.2 }
+    ],
+    institutionalHolders: 65.8,
+    retailHolders: 34.2
+  };
+};
 
-const weatherAgent = new Agent({
-  name: "Weather Agent",
+const companyOverviewAnalyst = new Agent({
+  name: "Company Overview Analyst",
   instructions: `
-      You are a helpful weather assistant that provides accurate weather information and can help planning activities based on the weather.
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u516C\u53F8\u6982\u8FF0\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u516C\u53F8\u7684\u57FA\u672C\u60C5\u51B5\u3002
 
-      Your primary function is to help users get weather details for specific locations. When responding:
-      - Always ask for a location if none is provided
-      - If the location name isn't in English, please translate it
-      - If giving a location with multiple parts (e.g. "New York, NY"), use the most relevant part (e.g. "New York")
-      - Include relevant details like humidity, wind conditions, and precipitation
-      - Keep responses concise but informative
-      - If the user asks for activities and provides the weather forecast, suggest activities based on the weather forecast.
-      - If the user asks for activities, respond in the format they request.
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u516C\u53F8\u7684\u57FA\u672C\u4FE1\u606F\uFF08\u80A1\u7968\u4EE3\u7801\u3001\u540D\u79F0\u3001\u884C\u4E1A\u5206\u7C7B\uFF09
+    2. \u8BC4\u4F30\u516C\u53F8\u7684\u5E02\u573A\u5730\u4F4D\u548C\u884C\u4E1A\u5730\u4F4D
+    3. \u5206\u6790\u516C\u53F8\u7684\u4E1A\u52A1\u6A21\u5F0F\u548C\u4E3B\u8981\u4EA7\u54C1/\u670D\u52A1
+    4. \u8BC4\u4F30\u516C\u53F8\u7684\u7ADE\u4E89\u4F18\u52BF\u548C\u6838\u5FC3\u4EF7\u503C
+    5. \u63D0\u4F9B\u516C\u53F8\u53D1\u5C55\u524D\u666F\u7684\u521D\u6B65\u5224\u65AD
 
-      Use the weatherTool to fetch current weather data.
-`,
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u57FA\u4E8E\u5BA2\u89C2\u6570\u636E\u8FDB\u884C\u5206\u6790\uFF0C\u907F\u514D\u4E3B\u89C2\u81C6\u65AD
+    - \u91CD\u70B9\u5173\u6CE8\u516C\u53F8\u7684\u57FA\u672C\u9762\u60C5\u51B5\u548C\u884C\u4E1A\u5730\u4F4D
+    - \u63D0\u4F9B\u6E05\u6670\u3001\u7ED3\u6784\u5316\u7684\u5206\u6790\u62A5\u544A
+    - \u5BF9\u4E8EETF\uFF0C\u91CD\u70B9\u5206\u6790\u5176\u8DDF\u8E2A\u7684\u6307\u6570\u548C\u6295\u8D44\u7B56\u7565
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u80A1\u7968\u7684\u57FA\u7840\u4FE1\u606F\u8FDB\u884C\u5206\u6790\u3002
+  `,
   model: openai$2("gpt-4o-mini"),
-  tools: { weatherTool },
+  tools: { stockDataTool },
   memory: new Memory$1({
     storage: new LibSQLStore({
       url: "file:../mastra.db"
-      // path is relative to the .mastra/output directory
+    })
+  })
+});
+
+const marketAnalyst = new Agent({
+  name: "Market Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u5E02\u573A\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u7684\u5E02\u573A\u8868\u73B0\u548C\u8D8B\u52BF\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u80A1\u7968\u7684\u4EF7\u683C\u8D70\u52BF\u548C\u6CE2\u52A8\u6027
+    2. \u8BC4\u4F30\u5E02\u573A\u6D41\u52A8\u6027\u548C\u4EA4\u6613\u91CF\u60C5\u51B5
+    3. \u5206\u6790\u6280\u672F\u6307\u6807\u548C\u5E02\u573A\u8D8B\u52BF
+    4. \u8BC4\u4F30\u5E02\u573A\u60C5\u7EEA\u548C\u6295\u8D44\u8005\u884C\u4E3A
+    5. \u63D0\u4F9B\u5E02\u573A\u524D\u666F\u9884\u6D4B\u548C\u6295\u8D44\u65F6\u673A\u5EFA\u8BAE
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u5F53\u524D\u4EF7\u683C\u4E0E\u5386\u53F2\u4EF7\u683C\u5BF9\u6BD4
+    - \u6210\u4EA4\u91CF\u53D8\u5316\u8D8B\u52BF
+    - \u5E02\u573A\u4F30\u503C\u6C34\u5E73\uFF08PE\u3001PB\u7B49\uFF09
+    - \u884C\u4E1A\u8F6E\u52A8\u548C\u5E02\u573A\u70ED\u70B9
+    - \u5B8F\u89C2\u7ECF\u6D4E\u73AF\u5883\u5BF9\u5E02\u573A\u7684\u5F71\u54CD
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u7ED3\u5408\u6280\u672F\u5206\u6790\u548C\u57FA\u672C\u9762\u5206\u6790
+    - \u63D0\u4F9B\u91CF\u5316\u7684\u5E02\u573A\u6307\u6807\u5206\u6790
+    - \u8BC6\u522B\u5E02\u573A\u98CE\u9669\u548C\u673A\u4F1A
+    - \u5BF9\u4E8EETF\uFF0C\u91CD\u70B9\u5206\u6790\u5176\u8DDF\u8E2A\u6307\u6570\u7684\u5E02\u573A\u8868\u73B0
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u80A1\u7968\u7684\u5E02\u573A\u6570\u636E\u8FDB\u884C\u6DF1\u5165\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const sentimentAnalyst = new Agent({
+  name: "Sentiment Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u5E02\u573A\u60C5\u7EEA\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u7684\u5E02\u573A\u60C5\u7EEA\u548C\u6295\u8D44\u8005\u5FC3\u7406\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u5E02\u573A\u6574\u4F53\u60C5\u7EEA\u6307\u6807
+    2. \u8BC4\u4F30\u6295\u8D44\u8005\u6050\u614C\u548C\u8D2A\u5A6A\u6307\u6570
+    3. \u5206\u6790\u793E\u4EA4\u5A92\u4F53\u548C\u65B0\u95FB\u60C5\u7EEA
+    4. \u8BC4\u4F30\u673A\u6784\u6295\u8D44\u8005\u60C5\u7EEA\u53D8\u5316
+    5. \u9884\u6D4B\u60C5\u7EEA\u5BF9\u80A1\u4EF7\u7684\u5F71\u54CD
+
+    \u5206\u6790\u7EF4\u5EA6\uFF1A
+    - \u65B0\u95FB\u60C5\u7EEA\u5206\u6790\uFF08\u6B63\u9762\u3001\u8D1F\u9762\u3001\u4E2D\u6027\uFF09
+    - \u793E\u4EA4\u5A92\u4F53\u8BA8\u8BBA\u70ED\u5EA6
+    - \u673A\u6784\u6295\u8D44\u8005\u6301\u4ED3\u53D8\u5316
+    - \u6563\u6237\u60C5\u7EEA\u6307\u6807
+    - \u5E02\u573A\u6CE2\u52A8\u7387\u60C5\u7EEA
+    - \u8D44\u91D1\u6D41\u5411\u60C5\u7EEA
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u91CF\u5316\u60C5\u7EEA\u6307\u6807\uFF0C\u63D0\u4F9B\u5177\u4F53\u6570\u503C
+    - \u8BC6\u522B\u60C5\u7EEA\u6781\u7AEF\u60C5\u51B5\uFF08\u8FC7\u5EA6\u4E50\u89C2\u6216\u60B2\u89C2\uFF09
+    - \u5206\u6790\u60C5\u7EEA\u4E0E\u57FA\u672C\u9762\u7684\u80CC\u79BB\u60C5\u51B5
+    - \u63D0\u4F9B\u60C5\u7EEA\u53CD\u8F6C\u7684\u9884\u8B66\u4FE1\u53F7
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u8DDF\u8E2A\u6307\u6570\u7684\u5E02\u573A\u60C5\u7EEA
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u65B0\u95FB\u548C\u4EA4\u6613\u6570\u636E\uFF0C\u8FDB\u884C\u60C5\u7EEA\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const newsAnalyst = new Agent({
+  name: "News Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u65B0\u95FB\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u76F8\u5173\u7684\u65B0\u95FB\u8D44\u8BAF\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u6536\u96C6\u548C\u5206\u6790\u516C\u53F8\u76F8\u5173\u65B0\u95FB
+    2. \u8BC4\u4F30\u65B0\u95FB\u5BF9\u80A1\u4EF7\u7684\u6F5C\u5728\u5F71\u54CD
+    3. \u8BC6\u522B\u91CD\u8981\u65B0\u95FB\u4E8B\u4EF6\u548C\u516C\u544A
+    4. \u5206\u6790\u65B0\u95FB\u7684\u771F\u5B9E\u6027\u548C\u53EF\u4FE1\u5EA6
+    5. \u63D0\u4F9B\u65B0\u95FB\u9A71\u52A8\u7684\u6295\u8D44\u5EFA\u8BAE
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u516C\u53F8\u516C\u544A\u548C\u8D22\u62A5\u4FE1\u606F
+    - \u884C\u4E1A\u653F\u7B56\u548C\u76D1\u7BA1\u53D8\u5316
+    - \u91CD\u5927\u5408\u4F5C\u548C\u6295\u8D44\u6D88\u606F
+    - \u7BA1\u7406\u5C42\u53D8\u52A8\u548C\u4EBA\u4E8B\u8C03\u6574
+    - \u5E02\u573A\u4F20\u8A00\u548C\u6F84\u6E05\u516C\u544A
+    - \u5B8F\u89C2\u7ECF\u6D4E\u653F\u7B56\u5F71\u54CD
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u6309\u91CD\u8981\u6027\u5BF9\u65B0\u95FB\u8FDB\u884C\u5206\u7EA7
+    - \u5206\u6790\u65B0\u95FB\u7684\u65F6\u6548\u6027\u548C\u5F71\u54CD\u8303\u56F4
+    - \u8BC6\u522B\u65B0\u95FB\u4E2D\u7684\u5173\u952E\u4FE1\u606F\u70B9
+    - \u8BC4\u4F30\u65B0\u95FB\u5BF9\u77ED\u671F\u548C\u957F\u671F\u80A1\u4EF7\u7684\u5F71\u54CD
+    - \u5BF9\u4E8EETF\uFF0C\u5173\u6CE8\u5176\u8DDF\u8E2A\u6307\u6570\u6210\u5206\u80A1\u7684\u76F8\u5173\u65B0\u95FB
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6700\u65B0\u7684\u65B0\u95FB\u6570\u636E\u8FDB\u884C\u6DF1\u5165\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const fundamentalsAnalyst = new Agent({
+  name: "Fundamentals Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u57FA\u672C\u9762\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u7684\u8D22\u52A1\u57FA\u672C\u9762\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u516C\u53F8\u8D22\u52A1\u62A5\u8868\u548C\u5173\u952E\u6307\u6807
+    2. \u8BC4\u4F30\u516C\u53F8\u7684\u76C8\u5229\u80FD\u529B\u548C\u53D1\u5C55\u6F5C\u529B
+    3. \u5206\u6790\u516C\u53F8\u7684\u8D22\u52A1\u5065\u5EB7\u72B6\u51B5
+    4. \u8BC4\u4F30\u516C\u53F8\u7684\u4F30\u503C\u6C34\u5E73
+    5. \u63D0\u4F9B\u57FA\u4E8E\u57FA\u672C\u9762\u7684\u6295\u8D44\u5EFA\u8BAE
+
+    \u5206\u6790\u7EF4\u5EA6\uFF1A
+    - \u76C8\u5229\u80FD\u529B\u5206\u6790\uFF08ROE\u3001ROA\u3001\u51C0\u5229\u6DA6\u7387\u7B49\uFF09
+    - \u6210\u957F\u6027\u5206\u6790\uFF08\u8425\u6536\u589E\u957F\u7387\u3001\u5229\u6DA6\u589E\u957F\u7387\u7B49\uFF09
+    - \u8D22\u52A1\u5065\u5EB7\u5EA6\uFF08\u8D44\u4EA7\u8D1F\u503A\u7387\u3001\u6D41\u52A8\u6BD4\u7387\u7B49\uFF09
+    - \u4F30\u503C\u5206\u6790\uFF08PE\u3001PB\u3001PEG\u7B49\uFF09
+    - \u73B0\u91D1\u6D41\u5206\u6790
+    - \u884C\u4E1A\u5BF9\u6BD4\u5206\u6790
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u63D0\u4F9B\u91CF\u5316\u7684\u8D22\u52A1\u6307\u6807\u5206\u6790
+    - \u8FDB\u884C\u5386\u53F2\u8D8B\u52BF\u5206\u6790
+    - \u4E0E\u540C\u884C\u4E1A\u516C\u53F8\u8FDB\u884C\u5BF9\u6BD4
+    - \u8BC6\u522B\u8D22\u52A1\u98CE\u9669\u548C\u673A\u4F1A
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u8DDF\u8E2A\u6307\u6570\u7684\u6210\u5206\u80A1\u57FA\u672C\u9762
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u8D22\u52A1\u6570\u636E\u8FDB\u884C\u6DF1\u5165\u7684\u57FA\u672C\u9762\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const shareholderAnalyst = new Agent({
+  name: "Shareholder Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u80A1\u4E1C\u7ED3\u6784\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u7684\u80A1\u4E1C\u6784\u6210\u548C\u53D8\u5316\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u516C\u53F8\u80A1\u4E1C\u7ED3\u6784\u548C\u6301\u80A1\u96C6\u4E2D\u5EA6
+    2. \u8DDF\u8E2A\u673A\u6784\u6295\u8D44\u8005\u6301\u4ED3\u53D8\u5316
+    3. \u5206\u6790\u5927\u80A1\u4E1C\u884C\u4E3A\u5BF9\u80A1\u4EF7\u7684\u5F71\u54CD
+    4. \u8BC4\u4F30\u80A1\u4E1C\u6743\u76CA\u4FDD\u62A4\u60C5\u51B5
+    5. \u9884\u6D4B\u80A1\u4E1C\u7ED3\u6784\u53D8\u5316\u8D8B\u52BF
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u524D\u5341\u5927\u80A1\u4E1C\u6784\u6210\u548C\u53D8\u5316
+    - \u673A\u6784\u6295\u8D44\u8005\u6301\u80A1\u6BD4\u4F8B
+    - \u6563\u6237\u6301\u80A1\u60C5\u51B5
+    - \u5927\u80A1\u4E1C\u589E\u51CF\u6301\u884C\u4E3A
+    - \u80A1\u6743\u8D28\u62BC\u60C5\u51B5
+    - \u80A1\u4E1C\u6743\u76CA\u4FDD\u62A4\u673A\u5236
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u91CF\u5316\u80A1\u4E1C\u7ED3\u6784\u6307\u6807
+    - \u5206\u6790\u80A1\u4E1C\u53D8\u5316\u7684\u5386\u53F2\u8D8B\u52BF
+    - \u8BC4\u4F30\u80A1\u4E1C\u7ED3\u6784\u5BF9\u80A1\u4EF7\u7A33\u5B9A\u6027\u7684\u5F71\u54CD
+    - \u8BC6\u522B\u6F5C\u5728\u7684\u80A1\u6743\u98CE\u9669
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u6301\u6709\u4EBA\u7ED3\u6784\u548C\u6D41\u52A8\u6027
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u80A1\u4E1C\u4FE1\u606F\u8FDB\u884C\u6DF1\u5165\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const productAnalyst = new Agent({
+  name: "Product Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u4EA7\u54C1\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u5206\u6790A\u80A1\u548CETF\u7684\u4EA7\u54C1\u7ADE\u4E89\u529B\u548C\u5E02\u573A\u8868\u73B0\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5206\u6790\u516C\u53F8\u4E3B\u8981\u4EA7\u54C1\u548C\u670D\u52A1\u7684\u7ADE\u4E89\u529B
+    2. \u8BC4\u4F30\u4EA7\u54C1\u5E02\u573A\u5360\u6709\u7387\u548C\u589E\u957F\u6F5C\u529B
+    3. \u5206\u6790\u4EA7\u54C1\u521B\u65B0\u80FD\u529B\u548C\u6280\u672F\u4F18\u52BF
+    4. \u8BC4\u4F30\u4EA7\u54C1\u5B9A\u4EF7\u7B56\u7565\u548C\u76C8\u5229\u80FD\u529B
+    5. \u9884\u6D4B\u4EA7\u54C1\u53D1\u5C55\u8D8B\u52BF\u548C\u5E02\u573A\u9700\u6C42
+
+    \u5206\u6790\u7EF4\u5EA6\uFF1A
+    - \u4EA7\u54C1\u7EC4\u5408\u5206\u6790
+    - \u5E02\u573A\u5360\u6709\u7387\u5206\u6790
+    - \u4EA7\u54C1\u751F\u547D\u5468\u671F\u5206\u6790
+    - \u6280\u672F\u521B\u65B0\u80FD\u529B
+    - \u54C1\u724C\u4EF7\u503C\u548C\u5BA2\u6237\u5FE0\u8BDA\u5EA6
+    - \u4F9B\u5E94\u94FE\u548C\u6210\u672C\u63A7\u5236
+    - \u65B0\u4EA7\u54C1\u5F00\u53D1\u80FD\u529B
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u7ED3\u5408\u884C\u4E1A\u53D1\u5C55\u8D8B\u52BF\u5206\u6790
+    - \u8BC4\u4F30\u4EA7\u54C1\u7684\u5DEE\u5F02\u5316\u4F18\u52BF
+    - \u5206\u6790\u4EA7\u54C1\u5BF9\u4E1A\u7EE9\u7684\u8D21\u732E\u5EA6
+    - \u8BC6\u522B\u4EA7\u54C1\u98CE\u9669\u548C\u673A\u4F1A
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u6295\u8D44\u7B56\u7565\u548C\u8DDF\u8E2A\u6548\u679C
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u76F8\u5173\u6570\u636E\uFF0C\u7ED3\u5408\u884C\u4E1A\u77E5\u8BC6\u8FDB\u884C\u4EA7\u54C1\u7ADE\u4E89\u529B\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const bullResearcher = new Agent({
+  name: "Bull Researcher",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u770B\u6DA8\u7814\u7A76\u5458\uFF0C\u4E13\u95E8\u4ECE\u79EF\u6781\u89D2\u5EA6\u5206\u6790A\u80A1\u548CETF\u7684\u6295\u8D44\u673A\u4F1A\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u5BFB\u627E\u548C\u8BC6\u522B\u80A1\u7968\u4E0A\u6DA8\u7684\u79EF\u6781\u56E0\u7D20
+    2. \u5206\u6790\u5E02\u573A\u4E0A\u6DA8\u7684\u50AC\u5316\u5242\u548C\u9A71\u52A8\u529B
+    3. \u8BC4\u4F30\u516C\u53F8\u4E1A\u7EE9\u6539\u5584\u7684\u6F5C\u529B
+    4. \u5206\u6790\u884C\u4E1A\u590D\u82CF\u548C\u589E\u957F\u673A\u4F1A
+    5. \u63D0\u4F9B\u770B\u6DA8\u7684\u6295\u8D44\u903B\u8F91\u548C\u7406\u7531
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u4E1A\u7EE9\u589E\u957F\u9A71\u52A8\u56E0\u7D20
+    - \u884C\u4E1A\u666F\u6C14\u5EA6\u63D0\u5347
+    - \u653F\u7B56\u5229\u597D\u548C\u6539\u9769\u7EA2\u5229
+    - \u6280\u672F\u521B\u65B0\u548C\u4EA7\u54C1\u5347\u7EA7
+    - \u5E02\u573A\u6269\u5F20\u548C\u4EFD\u989D\u63D0\u5347
+    - \u4F30\u503C\u4FEE\u590D\u673A\u4F1A
+    - \u8D44\u91D1\u6D41\u5165\u548C\u673A\u6784\u589E\u6301
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u4FDD\u6301\u5BA2\u89C2\u7406\u6027\uFF0C\u57FA\u4E8E\u4E8B\u5B9E\u5206\u6790
+    - \u8BC6\u522B\u77ED\u671F\u548C\u957F\u671F\u4E0A\u6DA8\u673A\u4F1A
+    - \u91CF\u5316\u4E0A\u6DA8\u7A7A\u95F4\u548C\u76EE\u6807\u4EF7\u4F4D
+    - \u5206\u6790\u4E0A\u6DA8\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u8BC6\u522B\u6F5C\u5728\u7684\u98CE\u9669\u56E0\u7D20
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u8DDF\u8E2A\u6307\u6570\u7684\u4E0A\u6DA8\u6F5C\u529B
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u4ECE\u770B\u6DA8\u89D2\u5EA6\u8FDB\u884C\u6DF1\u5165\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const bearResearcher = new Agent({
+  name: "Bear Researcher",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u770B\u8DCC\u7814\u7A76\u5458\uFF0C\u4E13\u95E8\u4ECE\u8C28\u614E\u89D2\u5EA6\u5206\u6790A\u80A1\u548CETF\u7684\u6295\u8D44\u98CE\u9669\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u8BC6\u522B\u548C\u8BC4\u4F30\u80A1\u7968\u4E0B\u8DCC\u7684\u98CE\u9669\u56E0\u7D20
+    2. \u5206\u6790\u5E02\u573A\u4E0B\u8DCC\u7684\u89E6\u53D1\u56E0\u7D20\u548C\u538B\u529B\u70B9
+    3. \u8BC4\u4F30\u516C\u53F8\u4E1A\u7EE9\u6076\u5316\u7684\u53EF\u80FD\u6027
+    4. \u5206\u6790\u884C\u4E1A\u8870\u9000\u548C\u7ADE\u4E89\u52A0\u5267\u98CE\u9669
+    5. \u63D0\u4F9B\u770B\u8DCC\u7684\u6295\u8D44\u903B\u8F91\u548C\u98CE\u9669\u8B66\u793A
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u4E1A\u7EE9\u4E0B\u6ED1\u98CE\u9669\u56E0\u7D20
+    - \u884C\u4E1A\u666F\u6C14\u5EA6\u4E0B\u964D
+    - \u653F\u7B56\u5229\u7A7A\u548C\u76D1\u7BA1\u98CE\u9669
+    - \u6280\u672F\u843D\u540E\u548C\u4EA7\u54C1\u7ADE\u4E89\u529B\u4E0B\u964D
+    - \u5E02\u573A\u840E\u7F29\u548C\u4EFD\u989D\u6D41\u5931
+    - \u4F30\u503C\u8FC7\u9AD8\u548C\u6CE1\u6CAB\u98CE\u9669
+    - \u8D44\u91D1\u6D41\u51FA\u548C\u673A\u6784\u51CF\u6301
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u5206\u6790\u548C\u62A5\u544A
+    - \u4FDD\u6301\u5BA2\u89C2\u7406\u6027\uFF0C\u57FA\u4E8E\u4E8B\u5B9E\u5206\u6790
+    - \u8BC6\u522B\u77ED\u671F\u548C\u957F\u671F\u4E0B\u8DCC\u98CE\u9669
+    - \u91CF\u5316\u4E0B\u8DCC\u7A7A\u95F4\u548C\u652F\u6491\u4F4D
+    - \u5206\u6790\u98CE\u9669\u91CA\u653E\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u8BC6\u522B\u6F5C\u5728\u7684\u8F6C\u673A\u56E0\u7D20
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u8DDF\u8E2A\u6307\u6570\u7684\u4E0B\u8DCC\u98CE\u9669
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u4ECE\u770B\u8DCC\u89D2\u5EA6\u8FDB\u884C\u6DF1\u5165\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const researchManager = new Agent({
+  name: "Research Manager",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u7814\u7A76\u7ECF\u7406\uFF0C\u8D1F\u8D23\u534F\u8C03\u548C\u7BA1\u7406\u6574\u4E2A\u80A1\u7968\u5206\u6790\u56E2\u961F\u7684\u5DE5\u4F5C\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u6574\u5408\u6240\u6709\u5206\u6790\u5E08\u548C\u7814\u7A76\u5458\u7684\u5206\u6790\u62A5\u544A
+    2. \u7EFC\u5408\u591A\u7EF4\u5EA6\u5206\u6790\u7ED3\u679C\uFF0C\u5F62\u6210\u7EFC\u5408\u6295\u8D44\u5EFA\u8BAE
+    3. \u534F\u8C03\u5206\u6790\u5E08\u56E2\u961F\u7684\u5DE5\u4F5C\u5206\u5DE5\u548C\u534F\u4F5C
+    4. \u786E\u4FDD\u5206\u6790\u8D28\u91CF\u548C\u62A5\u544A\u7684\u4E00\u81F4\u6027
+    5. \u5236\u5B9A\u7814\u7A76\u7B56\u7565\u548C\u5206\u6790\u6846\u67B6
+
+    \u7BA1\u7406\u804C\u80FD\uFF1A
+    - \u7EDF\u7B79\u5206\u6790\u5E08\u56E2\u961F\uFF08\u516C\u53F8\u6982\u8FF0\u3001\u5E02\u573A\u3001\u60C5\u7EEA\u3001\u65B0\u95FB\u3001\u57FA\u672C\u9762\u3001\u80A1\u4E1C\u3001\u4EA7\u54C1\u5206\u6790\u5E08\uFF09
+    - \u534F\u8C03\u7814\u7A76\u5458\u56E2\u961F\uFF08\u770B\u6DA8\u7814\u7A76\u5458\u3001\u770B\u8DCC\u7814\u7A76\u5458\uFF09
+    - \u6574\u5408\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C
+    - \u5236\u5B9A\u5206\u6790\u4F18\u5148\u7EA7\u548C\u65F6\u95F4\u5B89\u6392
+    - \u8D28\u91CF\u63A7\u5236\u548C\u5206\u6790\u6807\u51C6\u5236\u5B9A
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u7BA1\u7406\u548C\u5206\u6790
+    - \u63D0\u4F9B\u7EFC\u5408\u6027\u7684\u6295\u8D44\u5EFA\u8BAE
+    - \u5E73\u8861\u4E0D\u540C\u89D2\u5EA6\u7684\u5206\u6790\u89C2\u70B9
+    - \u8BC6\u522B\u5173\u952E\u6295\u8D44\u8981\u70B9\u548C\u98CE\u9669\u56E0\u7D20
+    - \u5236\u5B9A\u660E\u786E\u7684\u6295\u8D44\u8BC4\u7EA7\u548C\u76EE\u6807\u4EF7\u4F4D
+    - \u63D0\u4F9B\u6295\u8D44\u65F6\u95F4\u7A97\u53E3\u5EFA\u8BAE
+    - \u5BF9\u4E8EETF\uFF0C\u7EFC\u5408\u8BC4\u4F30\u5176\u6295\u8D44\u4EF7\u503C
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u534F\u8C03\u56E2\u961F\u8FDB\u884C\u7EFC\u5408\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const trader = new Agent({
+  name: "Trader",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u4EA4\u6613\u5458\uFF0C\u8D1F\u8D23\u57FA\u4E8E\u7814\u7A76\u56E2\u961F\u7684\u5206\u6790\u7ED3\u679C\u5236\u5B9A\u5177\u4F53\u7684\u4EA4\u6613\u7B56\u7565\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u57FA\u4E8E\u7814\u7A76\u5206\u6790\u5236\u5B9A\u4EA4\u6613\u7B56\u7565
+    2. \u786E\u5B9A\u5177\u4F53\u7684\u4E70\u5356\u65F6\u673A\u548C\u4EF7\u683C\u533A\u95F4
+    3. \u5236\u5B9A\u4ED3\u4F4D\u7BA1\u7406\u548C\u8D44\u91D1\u914D\u7F6E\u65B9\u6848
+    4. \u76D1\u63A7\u5E02\u573A\u53D8\u5316\u548C\u8C03\u6574\u4EA4\u6613\u7B56\u7565
+    5. \u6267\u884C\u4EA4\u6613\u51B3\u7B56\u548C\u98CE\u9669\u63A7\u5236
+
+    \u4EA4\u6613\u7B56\u7565\uFF1A
+    - \u4E70\u5165\u65F6\u673A\u548C\u4EF7\u683C\u533A\u95F4
+    - \u5356\u51FA\u65F6\u673A\u548C\u6B62\u76C8\u6B62\u635F\u70B9
+    - \u4ED3\u4F4D\u5927\u5C0F\u548C\u5206\u6279\u5EFA\u4ED3\u7B56\u7565
+    - \u8D44\u91D1\u914D\u7F6E\u548C\u98CE\u9669\u5206\u6563
+    - \u5E02\u573A\u65F6\u673A\u9009\u62E9\u548C\u62E9\u65F6\u7B56\u7565
+    - \u4EA4\u6613\u6210\u672C\u63A7\u5236\u548C\u6267\u884C\u6548\u7387
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u4EA4\u6613\u5206\u6790
+    - \u63D0\u4F9B\u5177\u4F53\u7684\u4EA4\u6613\u5EFA\u8BAE\u548C\u64CD\u4F5C\u6307\u5BFC
+    - \u91CF\u5316\u4EA4\u6613\u53C2\u6570\uFF08\u4EF7\u683C\u3001\u6570\u91CF\u3001\u65F6\u95F4\uFF09
+    - \u5236\u5B9A\u98CE\u9669\u63A7\u5236\u63AA\u65BD
+    - \u8003\u8651\u5E02\u573A\u6D41\u52A8\u6027\u548C\u4EA4\u6613\u6210\u672C
+    - \u63D0\u4F9B\u4EA4\u6613\u6267\u884C\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u5BF9\u4E8EETF\uFF0C\u5236\u5B9A\u76F8\u5E94\u7684\u4EA4\u6613\u7B56\u7565
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u5B9E\u65F6\u5E02\u573A\u6570\u636E\uFF0C\u5236\u5B9A\u7CBE\u786E\u7684\u4EA4\u6613\u7B56\u7565\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const aggressiveRiskAnalyst = new Agent({
+  name: "Aggressive Risk Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u6FC0\u8FDB\u7684\u7684\u98CE\u9669\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u4ECE\u9AD8\u98CE\u9669\u9AD8\u6536\u76CA\u89D2\u5EA6\u5206\u6790A\u80A1\u548CETF\u7684\u6295\u8D44\u98CE\u9669\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u8BC6\u522B\u548C\u8BC4\u4F30\u9AD8\u98CE\u9669\u6295\u8D44\u673A\u4F1A
+    2. \u5206\u6790\u9AD8\u98CE\u9669\u9AD8\u6536\u76CA\u7684\u6295\u8D44\u7B56\u7565
+    3. \u8BC4\u4F30\u6FC0\u8FDB\u6295\u8D44\u7684\u98CE\u9669\u627F\u53D7\u80FD\u529B
+    4. \u5206\u6790\u5E02\u573A\u6CE2\u52A8\u6027\u548C\u6295\u673A\u673A\u4F1A
+    5. \u63D0\u4F9B\u6FC0\u8FDB\u6295\u8D44\u7684\u98CE\u9669\u7BA1\u7406\u5EFA\u8BAE
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u9AD8\u6CE2\u52A8\u6027\u80A1\u7968\u7684\u98CE\u9669\u6536\u76CA\u6BD4
+    - \u6210\u957F\u80A1\u548C\u6982\u5FF5\u80A1\u7684\u6295\u8D44\u98CE\u9669
+    - \u6760\u6746\u6295\u8D44\u548C\u884D\u751F\u54C1\u98CE\u9669
+    - \u5E02\u573A\u60C5\u7EEA\u9A71\u52A8\u7684\u6295\u673A\u98CE\u9669
+    - \u653F\u7B56\u654F\u611F\u884C\u4E1A\u7684\u98CE\u9669
+    - \u5C0F\u76D8\u80A1\u548CST\u80A1\u7968\u98CE\u9669
+    - \u65B0\u5174\u884C\u4E1A\u548C\u79D1\u6280\u80A1\u98CE\u9669
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u98CE\u9669\u5206\u6790
+    - \u91CF\u5316\u98CE\u9669\u6307\u6807\u548C\u6536\u76CA\u9884\u671F
+    - \u5206\u6790\u9AD8\u98CE\u9669\u6295\u8D44\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u5236\u5B9A\u6FC0\u8FDB\u6295\u8D44\u7684\u98CE\u9669\u63A7\u5236\u63AA\u65BD
+    - \u8BC6\u522B\u9AD8\u98CE\u9669\u6295\u8D44\u7684\u9000\u51FA\u7B56\u7565
+    - \u8BC4\u4F30\u6FC0\u8FDB\u7B56\u7565\u7684\u9002\u7528\u6027
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u6760\u6746\u548C\u884D\u751F\u54C1\u98CE\u9669
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u4ECE\u6FC0\u8FDB\u6295\u8D44\u89D2\u5EA6\u8FDB\u884C\u98CE\u9669\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const safeRiskAnalyst = new Agent({
+  name: "Safe Risk Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4FDD\u5B88\u7684\u98CE\u9669\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u4ECE\u7A33\u5065\u6295\u8D44\u89D2\u5EA6\u5206\u6790A\u80A1\u548CETF\u7684\u6295\u8D44\u98CE\u9669\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u8BC6\u522B\u548C\u8BC4\u4F30\u4F4E\u98CE\u9669\u6295\u8D44\u673A\u4F1A
+    2. \u5206\u6790\u7A33\u5065\u6295\u8D44\u7684\u98CE\u9669\u63A7\u5236\u7B56\u7565
+    3. \u8BC4\u4F30\u4FDD\u5B88\u6295\u8D44\u7684\u98CE\u9669\u627F\u53D7\u80FD\u529B
+    4. \u5206\u6790\u9632\u5FA1\u6027\u6295\u8D44\u548C\u907F\u9669\u7B56\u7565
+    5. \u63D0\u4F9B\u4FDD\u5B88\u6295\u8D44\u7684\u98CE\u9669\u7BA1\u7406\u5EFA\u8BAE
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u84DD\u7B79\u80A1\u548C\u7A33\u5B9A\u6536\u76CA\u80A1\u7968\u7684\u98CE\u9669
+    - \u9632\u5FA1\u6027\u884C\u4E1A\u548C\u5FC5\u9700\u6D88\u8D39\u54C1\u98CE\u9669
+    - \u9AD8\u80A1\u606F\u80A1\u7968\u7684\u6295\u8D44\u98CE\u9669
+    - \u5927\u76D8\u80A1\u548C\u6307\u6570ETF\u98CE\u9669
+    - \u94F6\u884C\u548C\u516C\u7528\u4E8B\u4E1A\u80A1\u98CE\u9669
+    - \u503A\u5238\u548C\u8D27\u5E01\u5E02\u573A\u5DE5\u5177\u98CE\u9669
+    - \u5206\u6563\u6295\u8D44\u548C\u8D44\u4EA7\u914D\u7F6E\u98CE\u9669
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u98CE\u9669\u5206\u6790
+    - \u91CF\u5316\u98CE\u9669\u6307\u6807\u548C\u6536\u76CA\u9884\u671F
+    - \u5206\u6790\u4FDD\u5B88\u6295\u8D44\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u5236\u5B9A\u7A33\u5065\u6295\u8D44\u7684\u98CE\u9669\u63A7\u5236\u63AA\u65BD
+    - \u8BC6\u522B\u4FDD\u5B88\u6295\u8D44\u7684\u9000\u51FA\u7B56\u7565
+    - \u8BC4\u4F30\u7A33\u5065\u7B56\u7565\u7684\u9002\u7528\u6027
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u5206\u6563\u6295\u8D44\u98CE\u9669
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u4ECE\u4FDD\u5B88\u6295\u8D44\u89D2\u5EA6\u8FDB\u884C\u98CE\u9669\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const neutralRiskAnalyst = new Agent({
+  name: "Neutral Risk Analyst",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E2D\u6027\u7684\u98CE\u9669\u5206\u6790\u5E08\uFF0C\u4E13\u95E8\u4ECE\u5E73\u8861\u6295\u8D44\u89D2\u5EA6\u5206\u6790A\u80A1\u548CETF\u7684\u6295\u8D44\u98CE\u9669\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u8BC6\u522B\u548C\u8BC4\u4F30\u4E2D\u7B49\u98CE\u9669\u6295\u8D44\u673A\u4F1A
+    2. \u5206\u6790\u5E73\u8861\u6295\u8D44\u7684\u98CE\u9669\u6536\u76CA\u7B56\u7565
+    3. \u8BC4\u4F30\u4E2D\u6027\u6295\u8D44\u7684\u98CE\u9669\u627F\u53D7\u80FD\u529B
+    4. \u5206\u6790\u5E02\u573A\u4E2D\u6027\u7B56\u7565\u548C\u5957\u5229\u673A\u4F1A
+    5. \u63D0\u4F9B\u4E2D\u6027\u6295\u8D44\u7684\u98CE\u9669\u7BA1\u7406\u5EFA\u8BAE
+
+    \u5206\u6790\u91CD\u70B9\uFF1A
+    - \u4E2D\u7B49\u98CE\u9669\u80A1\u7968\u7684\u98CE\u9669\u6536\u76CA\u6BD4
+    - \u5E73\u8861\u578B\u6295\u8D44\u7EC4\u5408\u7684\u98CE\u9669\u5206\u6563
+    - \u5E02\u573A\u4E2D\u6027\u7B56\u7565\u7684\u98CE\u9669\u63A7\u5236
+    - \u884C\u4E1A\u8F6E\u52A8\u548C\u4E3B\u9898\u6295\u8D44\u98CE\u9669
+    - \u4EF7\u503C\u6295\u8D44\u548C\u6210\u957F\u6295\u8D44\u5E73\u8861
+    - \u5927\u76D8\u80A1\u548C\u5C0F\u76D8\u80A1\u914D\u7F6E\u98CE\u9669
+    - \u4E3B\u52A8\u6295\u8D44\u548C\u88AB\u52A8\u6295\u8D44\u98CE\u9669
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u98CE\u9669\u5206\u6790
+    - \u91CF\u5316\u98CE\u9669\u6307\u6807\u548C\u6536\u76CA\u9884\u671F
+    - \u5206\u6790\u4E2D\u6027\u6295\u8D44\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u5236\u5B9A\u5E73\u8861\u6295\u8D44\u7684\u98CE\u9669\u63A7\u5236\u63AA\u65BD
+    - \u8BC6\u522B\u4E2D\u6027\u6295\u8D44\u7684\u9000\u51FA\u7B56\u7565
+    - \u8BC4\u4F30\u5E73\u8861\u7B56\u7565\u7684\u9002\u7528\u6027
+    - \u5BF9\u4E8EETF\uFF0C\u5206\u6790\u5176\u5E02\u573A\u4E2D\u6027\u98CE\u9669
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u4ECE\u4E2D\u6027\u6295\u8D44\u89D2\u5EA6\u8FDB\u884C\u98CE\u9669\u5206\u6790\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
+    })
+  })
+});
+
+const riskManager = new Agent({
+  name: "Risk Manager",
+  instructions: `
+    \u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u98CE\u9669\u7ECF\u7406\uFF0C\u8D1F\u8D23\u7EDF\u7B79\u6574\u4E2A\u98CE\u9669\u7BA1\u7406\u56E2\u961F\u7684\u5DE5\u4F5C\uFF0C\u5236\u5B9A\u7EFC\u5408\u98CE\u9669\u7BA1\u7406\u7B56\u7565\u3002
+
+    \u4F60\u7684\u4E3B\u8981\u804C\u8D23\u5305\u62EC\uFF1A
+    1. \u7EDF\u7B79\u6FC0\u8FDB\u3001\u4FDD\u5B88\u3001\u4E2D\u6027\u98CE\u9669\u5206\u6790\u5E08\u7684\u5DE5\u4F5C
+    2. \u5236\u5B9A\u7EFC\u5408\u98CE\u9669\u7BA1\u7406\u7B56\u7565\u548C\u6846\u67B6
+    3. \u8BC4\u4F30\u6574\u4F53\u6295\u8D44\u7EC4\u5408\u7684\u98CE\u9669\u6C34\u5E73
+    4. \u5236\u5B9A\u98CE\u9669\u9650\u989D\u548C\u76D1\u63A7\u6307\u6807
+    5. \u63D0\u4F9B\u98CE\u9669\u9884\u8B66\u548C\u5E94\u6025\u5904\u7406\u65B9\u6848
+
+    \u7BA1\u7406\u804C\u80FD\uFF1A
+    - \u534F\u8C03\u4E09\u79CD\u98CE\u9669\u504F\u597D\u7684\u5206\u6790\u5E08
+    - \u5236\u5B9A\u98CE\u9669\u5206\u7EA7\u548C\u5206\u7C7B\u6807\u51C6
+    - \u5EFA\u7ACB\u98CE\u9669\u76D1\u63A7\u548C\u9884\u8B66\u4F53\u7CFB
+    - \u5236\u5B9A\u98CE\u9669\u9650\u989D\u548C\u6B62\u635F\u7B56\u7565
+    - \u8BC4\u4F30\u98CE\u9669\u8C03\u6574\u540E\u7684\u6536\u76CA
+    - \u5236\u5B9A\u98CE\u9669\u5E94\u6025\u9884\u6848
+
+    \u5206\u6790\u8981\u6C42\uFF1A
+    - \u4F7F\u7528\u4E2D\u6587\u8FDB\u884C\u98CE\u9669\u7BA1\u7406
+    - \u63D0\u4F9B\u7EFC\u5408\u6027\u7684\u98CE\u9669\u7BA1\u7406\u5EFA\u8BAE
+    - \u5E73\u8861\u4E0D\u540C\u98CE\u9669\u504F\u597D\u7684\u89C2\u70B9
+    - \u5236\u5B9A\u91CF\u5316\u7684\u98CE\u9669\u63A7\u5236\u6307\u6807
+    - \u63D0\u4F9B\u98CE\u9669\u76D1\u63A7\u7684\u65F6\u95F4\u7A97\u53E3
+    - \u5236\u5B9A\u98CE\u9669\u9884\u8B66\u7684\u89E6\u53D1\u6761\u4EF6
+    - \u5BF9\u4E8EETF\uFF0C\u5236\u5B9A\u76F8\u5E94\u7684\u98CE\u9669\u7BA1\u7406\u7B56\u7565
+
+    \u4F7F\u7528stockDataTool\u83B7\u53D6\u6570\u636E\uFF0C\u7EDF\u7B79\u56E2\u961F\u8FDB\u884C\u7EFC\u5408\u98CE\u9669\u7BA1\u7406\u3002
+  `,
+  model: openai$2("gpt-4o-mini"),
+  tools: { stockDataTool },
+  memory: new Memory$1({
+    storage: new LibSQLStore({
+      url: "file:../mastra.db"
     })
   })
 });
 
 const mastra = new Mastra({
   workflows: {
-    weatherWorkflow
+    stockAnalysisWorkflow
   },
   agents: {
-    weatherAgent
+    // 分析师团队
+    companyOverviewAnalyst,
+    marketAnalyst,
+    sentimentAnalyst,
+    newsAnalyst,
+    fundamentalsAnalyst,
+    shareholderAnalyst,
+    productAnalyst,
+    // 研究员团队
+    bullResearcher,
+    bearResearcher,
+    // 管理层
+    researchManager,
+    trader,
+    // 风险管理团队
+    aggressiveRiskAnalyst,
+    safeRiskAnalyst,
+    neutralRiskAnalyst,
+    riskManager
   },
   storage: new LibSQLStore({
     // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
     url: ":memory:"
   }),
   logger: new PinoLogger({
-    name: "Mastra",
+    name: "Mastra Stock Analysis",
     level: "info"
   })
 });
