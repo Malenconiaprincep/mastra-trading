@@ -46,11 +46,41 @@ cp env.example .env
 # 编辑 .env 文件，填入您的 API 密钥
 ```
 
+### AI 模型配置
+
+系统支持两种 AI 模型：
+
+#### 使用 Qwen (推荐，无需 OpenAI 密钥)
+
+```bash
+# 设置 AI 提供商为 Qwen
+AI_PROVIDER=qwen
+QWEN_API_KEY=your_qwen_api_key_here
+QWEN_MODEL=qwen-plus
+```
+
+#### 使用 OpenAI
+
+```bash
+# 设置 AI 提供商为 OpenAI
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
 3. 运行分析：
 
 ```bash
 # 分析特定股票
 npm run analyze 000001.SZ
+
+# 测试 Qwen Agent (需要设置 QWEN_API_KEY)
+npm run test:qwen-simple
+
+# 测试完整系统 (需要设置 API 密钥)
+npm run test:qwen
+
+# 测试模拟数据 (无需 API 密钥)
+npm run test:mock
 
 # 或运行开发服务器
 npm run dev

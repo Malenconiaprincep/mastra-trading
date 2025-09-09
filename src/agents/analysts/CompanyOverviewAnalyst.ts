@@ -1,14 +1,15 @@
-import { Agent } from '../../core/Agent';
+import { AgentFactory, UnifiedAgent, UnifiedAgentConfig } from '../../core/AgentFactory';
 import { CompanyOverview, AnalystReport } from '../../types';
 import { StockDataFetcher } from '../../utils/dataFetchers';
 
 export class CompanyOverviewAnalyst {
-  private agent: Agent;
+  private agent: UnifiedAgent;
   private dataFetcher: StockDataFetcher;
 
-  constructor(openaiApiKey: string, dataFetcher: StockDataFetcher) {
+  constructor(provider: 'openai' | 'qwen', apiKey: string, dataFetcher: StockDataFetcher) {
     this.dataFetcher = dataFetcher;
-    this.agent = new Agent({
+
+    const config: UnifiedAgentConfig = {
       name: 'CompanyOverviewAnalyst',
       instructions: `你是一位专业的公司概述分析师。你的职责是：
 
@@ -20,12 +21,14 @@ export class CompanyOverviewAnalyst {
 
 请基于提供的数据进行深入分析，并提供专业的见解和建议。`,
       model: {
-        provider: 'OPEN_AI',
-        name: 'gpt-4',
+        provider,
+        name: provider === 'openai' ? 'gpt-4' : 'qwen-plus',
         toolChoice: 'auto',
       },
       tools: [],
-    }, openaiApiKey);
+    };
+
+    this.agent = AgentFactory.createAgent(config, apiKey);
   }
 
   async analyze(symbol: string): Promise<AnalystReport> {

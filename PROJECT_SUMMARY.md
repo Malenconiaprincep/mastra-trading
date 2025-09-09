@@ -39,12 +39,14 @@
 
 - **TypeScript** - 类型安全的开发语言
 - **OpenAI GPT-4** - AI Agent 核心引擎
+- **阿里云 Qwen** - 国产 AI 模型支持
 - **Tushare API** - A 股数据源
 - **Axios** - HTTP 客户端
 - **Zod** - 数据验证
 
 ### 关键特性
 
+- ✅ **多 AI 模型支持** - 支持 OpenAI 和阿里云 Qwen
 - ✅ **并行处理** - 分析师团队同时工作，提高效率
 - ✅ **模块化设计** - 每个 Agent 职责单一，易于维护
 - ✅ **类型安全** - 完整的 TypeScript 类型定义
@@ -93,10 +95,13 @@ cp env.example .env
 # 分析特定股票
 npm run analyze 000001.SZ
 
-# 测试系统 (需要API密钥)
-npm run test:system
+# 测试 Qwen (需要 QWEN_API_KEY)
+npm run test:qwen-simple
 
-# 测试模拟数据
+# 测试完整系统 (需要API密钥)
+npm run test:qwen
+
+# 测试模拟数据 (无需API密钥)
 npm run test:mock
 ```
 
@@ -149,4 +154,14 @@ npm run test:mock
 
 成功创建了一个功能完整、架构清晰的多智能体股票分析系统。系统采用现代化的技术栈，具有良好的可维护性和扩展性。通过 17 个专业 AI Agent 的协作，能够为 A 股和 ETF 提供全面的分析服务，包括基本面分析、技术分析、情绪分析、风险评估等多个维度。
 
-系统已经准备就绪，只需要配置有效的 OpenAI API 密钥即可开始使用真实的 AI 分析功能。
+### 🎯 新增功能
+
+- ✅ **Qwen 集成** - 支持阿里云通义千问模型
+- ✅ **多 AI 模型支持** - 可在 OpenAI 和 Qwen 之间切换
+- ✅ **成本优化** - Qwen 模型成本更低，中文支持更好
+- ✅ **灵活配置** - 通过环境变量轻松切换 AI 提供商
+
+系统已经准备就绪，支持两种使用方式：
+
+1. **使用 Qwen** (推荐) - 设置 `QWEN_API_KEY` 即可开始使用
+2. **使用 OpenAI** - 设置 `OPENAI_API_KEY` 使用 GPT-4 模型

@@ -4,8 +4,15 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export interface Config {
-  openai: {
-    apiKey: string;
+  ai: {
+    provider: 'openai' | 'qwen';
+    openai?: {
+      apiKey: string;
+    };
+    qwen?: {
+      apiKey: string;
+      model: string;
+    };
   };
   tushare: {
     token?: string;
@@ -24,8 +31,15 @@ export interface Config {
 }
 
 export const config: Config = {
-  openai: {
-    apiKey: process.env.OPENAI_API_KEY || '',
+  ai: {
+    provider: (process.env.AI_PROVIDER as 'openai' | 'qwen') || 'qwen',
+    openai: process.env.OPENAI_API_KEY ? {
+      apiKey: process.env.OPENAI_API_KEY,
+    } : undefined,
+    qwen: process.env.QWEN_API_KEY ? {
+      apiKey: process.env.QWEN_API_KEY,
+      model: process.env.QWEN_MODEL || 'qwen-plus',
+    } : undefined,
   },
   tushare: {
     token: process.env.TUSHARE_TOKEN,
@@ -45,8 +59,14 @@ export const config: Config = {
 
 // 验证配置
 export function validateConfig(): void {
-  if (!config.openai.apiKey) {
-    throw new Error('OPENAI_API_KEY 环境变量是必需的');
+  const { ai } = config;
+
+  if (ai.provider === 'openai' && !ai.openai?.apiKey) {
+    throw new Error('使用 OpenAI 时，OPENAI_API_KEY 环境变量是必需的');
+  }
+
+  if (ai.provider === 'qwen' && !ai.qwen?.apiKey) {
+    throw new Error('使用 Qwen 时，QWEN_API_KEY 环境变量是必需的');
   }
 
   if (!config.app.useMockData && !config.tushare.token) {

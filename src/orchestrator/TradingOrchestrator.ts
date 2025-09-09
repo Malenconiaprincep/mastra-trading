@@ -34,7 +34,8 @@ export class TradingOrchestrator {
   private dataFetcher: StockDataFetcher | MockDataFetcher;
 
   constructor(
-    openaiApiKey: string,
+    provider: 'openai' | 'qwen',
+    apiKey: string,
     tushareToken?: string,
     newsApiKey?: string,
     useMockData: boolean = true
@@ -47,10 +48,10 @@ export class TradingOrchestrator {
     }
 
     // 初始化各个团队
-    this.analystTeam = AnalystTeamFactory.createAnalystTeam(openaiApiKey, this.dataFetcher);
-    this.researcherTeam = ResearcherTeamFactory.createResearcherTeam(openaiApiKey);
-    this.managementTeam = ManagementTeamFactory.createManagementTeam(openaiApiKey);
-    this.riskManagementTeam = RiskManagementTeamFactory.createRiskManagementTeam(openaiApiKey);
+    this.analystTeam = AnalystTeamFactory.createAnalystTeam(provider, apiKey, this.dataFetcher);
+    this.researcherTeam = ResearcherTeamFactory.createResearcherTeam(provider, apiKey);
+    this.managementTeam = ManagementTeamFactory.createManagementTeam(provider, apiKey);
+    this.riskManagementTeam = RiskManagementTeamFactory.createRiskManagementTeam(provider, apiKey);
   }
 
   async analyzeStock(symbol: string): Promise<TradingAnalysisResult> {

@@ -30,17 +30,18 @@ export interface AnalystTeam {
 // 分析师团队工厂类
 export class AnalystTeamFactory {
   static createAnalystTeam(
-    openaiApiKey: string,
+    provider: 'openai' | 'qwen',
+    apiKey: string,
     dataFetcher: any
   ): AnalystTeam {
     return {
-      companyOverviewAnalyst: new CompanyOverviewAnalyst(openaiApiKey, dataFetcher),
-      marketAnalyst: new MarketAnalyst(openaiApiKey, dataFetcher),
-      sentimentAnalyst: new SentimentAnalyst(openaiApiKey, dataFetcher),
-      newsAnalyst: new NewsAnalyst(openaiApiKey, dataFetcher),
-      fundamentalsAnalyst: new FundamentalsAnalyst(openaiApiKey, dataFetcher),
-      shareholderAnalyst: new ShareholderAnalyst(openaiApiKey, dataFetcher),
-      productAnalyst: new ProductAnalyst(openaiApiKey, dataFetcher),
+      companyOverviewAnalyst: new CompanyOverviewAnalyst(provider, apiKey, dataFetcher),
+      marketAnalyst: new MarketAnalyst(provider, apiKey, dataFetcher),
+      sentimentAnalyst: new SentimentAnalyst(provider, apiKey, dataFetcher),
+      newsAnalyst: new NewsAnalyst(provider, apiKey, dataFetcher),
+      fundamentalsAnalyst: new FundamentalsAnalyst(provider, apiKey, dataFetcher),
+      shareholderAnalyst: new ShareholderAnalyst(provider, apiKey, dataFetcher),
+      productAnalyst: new ProductAnalyst(provider, apiKey, dataFetcher),
     };
   }
 }

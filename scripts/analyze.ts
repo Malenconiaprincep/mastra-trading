@@ -10,12 +10,26 @@ async function analyzeStock(symbol: string) {
     // 验证配置
     validateConfig();
 
+    const { ai, tushare, news, app } = config;
+
+    // 获取 API 密钥
+    const apiKey = ai.provider === 'openai'
+      ? ai.openai?.apiKey
+      : ai.qwen?.apiKey;
+
+    if (!apiKey) {
+      throw new Error(`请设置 ${ai.provider.toUpperCase()}_API_KEY 环境变量`);
+    }
+
+    console.log(`🤖 使用 AI 模型: ${ai.provider} (${ai.provider === 'qwen' ? ai.qwen?.model : 'gpt-4'})`);
+
     // 创建交易协调器
     const orchestrator = new TradingOrchestrator(
-      config.openai.apiKey,
-      config.tushare.token,
-      config.news.apiKey,
-      config.app.useMockData
+      ai.provider,
+      apiKey,
+      tushare.token,
+      news.apiKey,
+      app.useMockData
     );
 
     // 分析股票

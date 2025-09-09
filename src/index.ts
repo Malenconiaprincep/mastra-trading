@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { TradingOrchestrator } from './orchestrator/TradingOrchestrator';
+import { config, validateConfig } from './config';
 
 // 加载环境变量
 dotenv.config();
@@ -8,22 +9,29 @@ async function main() {
   try {
     console.log('🚀 启动 Mastra 股票分析系统...');
 
-    // 检查必要的环境变量
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    if (!openaiApiKey) {
-      throw new Error('请设置 OPENAI_API_KEY 环境变量');
+    // 验证配置
+    validateConfig();
+
+    const { ai, tushare, news, app } = config;
+
+    // 获取 API 密钥
+    const apiKey = ai.provider === 'openai'
+      ? ai.openai?.apiKey
+      : ai.qwen?.apiKey;
+
+    if (!apiKey) {
+      throw new Error(`请设置 ${ai.provider.toUpperCase()}_API_KEY 环境变量`);
     }
 
-    const tushareToken = process.env.TUSHARE_TOKEN;
-    const newsApiKey = process.env.NEWS_API_KEY;
-    const useMockData = process.env.USE_MOCK_DATA === 'true';
+    console.log(`🤖 使用 AI 模型: ${ai.provider} (${ai.provider === 'qwen' ? ai.qwen?.model : 'gpt-4'})`);
 
     // 创建交易协调器
     const orchestrator = new TradingOrchestrator(
-      openaiApiKey,
-      tushareToken,
-      newsApiKey,
-      useMockData
+      ai.provider,
+      apiKey,
+      tushare.token,
+      news.apiKey,
+      app.useMockData
     );
 
     // 示例：分析股票
